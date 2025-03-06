@@ -1,2 +1,2 @@
 # cortex_challenge
-Preliminary Challenge for applying to Cortex as an intern
+challenge to use a movign average filter to alert user if seizure is detected using eeg readings
