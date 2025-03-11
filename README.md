@@ -1,2 +1,2 @@
 # cortex_challenge
-Preliminary Challenge for applying to Cortex as an intern
+challenge to use a moving average filter to alert user if seizure is detected using eeg data (using a potentiometer + sin wave to simulate eeg data)
