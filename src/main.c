@@ -22,7 +22,7 @@ void init_usart5() {
 
     RCC->APB1ENR |= RCC_APB1ENR_USART5EN;
     USART5->CR1 &= ~USART_CR1_UE; //disable USART
-    USART5->CR1 &= ~USART_CR1_M; //8 bit data
+    USART5->CR1 &= ~USART_CR1_M; //8 bit data size
     USART5->CR2 &= ~USART_CR2_STOP; //1 stop bit
     USART5->CR1 &= ~USART_CR1_PCE; //no parity
     USART5->CR1 &= ~USART_CR1_OVER8; //oversampling by 16
@@ -162,42 +162,100 @@ int calc_mov_avg(){
     return sum / BUFFER_SIZE;
 }
 
-// Timer 2 interrupt handler
-void TIM1_IRQHandler(void) {
-    TIM1->SR &= ~TIM_SR_UIF;  // Clear interrupt flag
-    buffer[buffer_index] = sample;
+// Timer 3 interrupt handler
+void TIM3_IRQHandler(void) {
+    TIM3->SR &= ~TIM_SR_UIF;  // Clear interrupt flag
+    buffer[buffer_index] = abs(sample - 2048);
     buffer_index = (buffer_index + 1) % BUFFER_SIZE;
 
     moving_avg = calc_mov_avg();
-    printf("Moving average: %d\n", moving_avg);
+    //printf("moving average: %d\n", moving_avg);
 }
 
-void init_tim1(void) {
-    RCC->APB2ENR |= RCC_APB2ENR_TIM1EN;
+void init_tim3(void) {
+    RCC->APB1ENR |= RCC_APB1ENR_TIM3EN;
 
     //interrupt is invoked every 10ms (100Hz)
-    TIM1->PSC = 48 - 1;  //psc = 48
-    TIM1->ARR = 10000 - 1;  //arr = 10000
+    TIM3->PSC = 48 - 1;  //psc = 48
+    TIM3->ARR = 10000 - 1;  //arr = 10000
 
     // Enable update interrupt for Timer 2
-    TIM1->DIER |= TIM_DIER_UIE;
-    NVIC_EnableIRQ(TIM2_IRQn);
-    TIM1->CR1 |= TIM_CR1_CEN;    
+    TIM3->DIER |= TIM_DIER_UIE;
+    NVIC_EnableIRQ(TIM3_IRQn);
+    TIM3->CR1 |= TIM_CR1_CEN;    
 }
 //END DATA AQUISTION AND PROCESSING
 
+
+
+//ALERT SYSTEM
+#define THRESHOLD 500 //threshold for seizure detection
+
+void init_leds(void) {
+    RCC->AHBENR |= RCC_AHBENR_GPIOBEN;
+    GPIOB->MODER &= ~((3 << (8 * 2)) | (3 << (10 * 2))); // reset pins 8 and 10
+    GPIOB->MODER |= ((1 << (8 * 2)) | (1 << (10 * 2))); // set pins 8 and 10 to output
+}
+
+//function for toggling LEDs
+void togglexn(GPIO_TypeDef *port, int n) {
+    port->ODR ^= (1 << n);
+  }
+
+void TIM7_IRQHandler(void) {
+    TIM7->SR &= ~TIM_SR_UIF;  // Clear interrupt flag
+
+    if (moving_avg > THRESHOLD) {
+        printf("Seizure detected!\n");
+        if(GPIOB->ODR & (1 << 10)) {
+            togglexn(GPIOB, 8);
+            togglexn(GPIOB, 10);
+        } else {
+            togglexn(GPIOB, 8);
+        }
+    } else {
+        printf("Normal\n");
+        if(GPIOB->ODR & (1 << 8)) {
+            togglexn(GPIOB, 8);
+            togglexn(GPIOB, 10);
+        } else {
+            togglexn(GPIOB, 10);
+        }
+    }
+}
+
+void init_tim7(void) {
+    RCC->APB1ENR |= RCC_APB1ENR_TIM7EN;
+
+    //interrupt is invoked every 1s (1Hz)
+    TIM7->PSC = 48000 - 1;  //psc = 48000
+    TIM7->ARR = 1000 - 1;  //arr = 1000
+
+    // Enable update interrupt for Timer 7
+    TIM7->DIER |= TIM_DIER_UIE;
+    NVIC_EnableIRQ(TIM7_IRQn);
+    TIM7->CR1 |= TIM_CR1_CEN;    
+}
+
+
+
 int main(void){
     internal_clock();
-    //enable_ports();
+
+    //initialize "brain wave" system
     setup_adc();
     init_tim2();
     init_wavetable();
     setup_dac();
     init_tim6();
-    init_tim1();
+
+    //initialize data aquisition and processing
+    init_tim3();
     init_usart5();
 
-    printf("Starting...\n");
+    //initialize alert system
+    init_leds();
+    init_tim7();
 
     while(1);
 }
