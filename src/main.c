@@ -5,6 +5,12 @@
 
 void internal_clock();
 
+void nano_wait(unsigned int n) {
+    asm(    "        mov r0,%0\n"
+            "repeat: sub r0,#83\n"
+            "        bgt repeat\n" : : "r"(n) : "r0", "cc");
+}
+
 //ENABLE USART FOR PRINTF
 void init_usart5() {
     RCC->AHBENR |= RCC_AHBENR_GPIOCEN;
@@ -189,7 +195,7 @@ void init_tim3(void) {
 
 
 //ALERT SYSTEM
-#define THRESHOLD 500 //threshold for seizure detection
+#define THRESHOLD 400 //threshold for seizure detection
 
 void init_leds(void) {
     RCC->AHBENR |= RCC_AHBENR_GPIOBEN;
@@ -207,6 +213,7 @@ void TIM7_IRQHandler(void) {
 
     if (moving_avg > THRESHOLD) {
         printf("Seizure detected!\n");
+        spi1_display1("Seizure Detected!");
         if(GPIOB->ODR & (1 << 10)) {
             togglexn(GPIOB, 8);
             togglexn(GPIOB, 10);
@@ -215,6 +222,7 @@ void TIM7_IRQHandler(void) {
         }
     } else {
         printf("Normal\n");
+        spi1_display1("Normal           ");
         if(GPIOB->ODR & (1 << 8)) {
             togglexn(GPIOB, 8);
             togglexn(GPIOB, 10);
@@ -236,6 +244,56 @@ void init_tim7(void) {
     NVIC_EnableIRQ(TIM7_IRQn);
     TIM7->CR1 |= TIM_CR1_CEN;    
 }
+//END ALERT SYSTEM
+
+
+
+//SPI SYSTEM FOR FUN
+void init_spi1() {
+    RCC->APB2ENR |= RCC_APB2ENR_SPI1EN;
+    RCC->AHBENR |= RCC_AHBENR_GPIOAEN; //set clock
+
+    GPIOA->MODER &= ~((3 << (5 * 2)) | (3 << (7 * 2)) | (3 << (15 * 2))); // reset pins
+    GPIOA->MODER |= (2 << (5 * 2)) | (2 << (7 * 2)) | (2 << (15 * 2)); //set output
+
+    GPIOA->AFR[0] &= ~((0xF << (5 * 4)) | (0xF << (7 * 4))); //set channels for pins 5,7 (AF0)
+    GPIOA->AFR[1] &= ~(0xF << ((15 - 8) * 4)); //set channels for pins 15 (AF0)
+    
+    SPI1->CR1 &= ~SPI_CR1_SPE;
+    SPI1->CR1 |= SPI_CR1_MSTR | SPI_CR1_BR;
+    SPI1->CR2 = SPI_CR2_SSOE | SPI_CR2_NSSP | SPI_CR2_TXDMAEN |  
+                (SPI_CR2_DS_0 | SPI_CR2_DS_3);
+    SPI1->CR1 |= SPI_CR1_SPE;
+}
+
+void spi_cmd(unsigned int data) {
+    while (!(SPI1->SR & SPI_SR_TXE));
+    SPI1->DR = data;
+}
+
+void spi_data(unsigned int data) {
+    spi_cmd(data | 0x200);
+}
+
+void spi1_init_oled() {
+    nano_wait(1000000); 
+    spi_cmd(0x38);
+    spi_cmd(0x08);
+    spi_cmd(0x01);
+    nano_wait(2000000);
+    spi_cmd(0x06);
+    spi_cmd(0x02);
+    spi_cmd(0x0C);
+}
+
+void spi1_display1(const char *string) {
+    spi_cmd(0x02);
+    while (*string != '\0') {
+        spi_data(*string);
+        string++;
+    }
+}
+//END SPI SYSTEM
 
 
 
@@ -256,6 +314,10 @@ int main(void){
     //initialize alert system
     init_leds();
     init_tim7();
+
+    //initialize spi system
+    init_spi1();
+    spi1_init_oled();
 
     while(1);
 }
